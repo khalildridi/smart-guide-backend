@@ -6,6 +6,7 @@ require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 const supabaseRoutes = require('./routes/supabase');
 const crawlerRoutes = require('./routes/crawler');
 const { createRateLimiter } = require('./middleware/rateLimit');
+const { buildOpenApiSpec } = require('./openapi');
 
 const app = express();
 const configuredOrigins = (process.env.CORS_ORIGINS || '')
@@ -69,6 +70,41 @@ app.use('/api/supabase/db', writeLimiter);
 
 app.use('/api/supabase', supabaseRoutes);
 app.use('/api/crawler', crawlerRoutes);
+
+app.get('/docs.json', (req, res) => {
+  const serverUrl = `${req.protocol}://${req.get('host')}`;
+  res.json(buildOpenApiSpec(serverUrl));
+});
+app.get('/api/docs.json', (req, res) => {
+  const serverUrl = `${req.protocol}://${req.get('host')}`;
+  res.json(buildOpenApiSpec(serverUrl));
+});
+
+app.get('/docs', (req, res) => {
+  res.type('html').send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Smart Guide API Docs</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+    <style>body{margin:0;background:#fafafa}#swagger-ui{max-width:1200px;margin:0 auto}</style>
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script>
+      window.ui = SwaggerUIBundle({
+        url: '/docs.json',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        persistAuthorization: true
+      });
+    </script>
+  </body>
+</html>`);
+});
+app.get('/api/docs', (req, res) => res.redirect(302, '/docs'));
 
 app.get('/api/health', (req, res) =>
   res.json({
