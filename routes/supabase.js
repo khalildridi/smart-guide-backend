@@ -1033,7 +1033,7 @@ router.post('/rpc/:name', async (req, res) => {
   const authorization = rule.userScoped && accessToken ? `Bearer ${accessToken}` : `Bearer ${SUPABASE_SERVER_KEY}`;
 
   try {
-    const resp = await fetch(`${SUPABASE_URL.replace(/\/$/, '')}/rpc/${encodeURIComponent(name)}`, {
+    const resp = await fetch(`${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/rpc/${encodeURIComponent(name)}`, {
       method: 'POST',
       headers: {
         apikey,
