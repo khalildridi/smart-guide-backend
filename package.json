@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "smoke:api": "node scripts/smoke-api.mjs",
+    "e2e:critical": "node scripts/e2e-critical.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",
