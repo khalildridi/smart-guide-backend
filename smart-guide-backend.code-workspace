@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../smart-guide"
+		}
+	],
+	"settings": {
+		"Codegeex.CommitMessage.LanguagePreference": "中文",
+		"Codegeex.CommitMessageStyle": "ConventionalCommits",
+		"Codegeex.GenerationPreference": "automatic",
+		"Codegeex.RepoIndex": true
+	}
+}

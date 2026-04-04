@@ -932,7 +932,13 @@ router.post('/db/plans', async (req, res) => {
   const accessToken = req.headers.authorization?.split(' ')[1];
   const user = await verifyUser(accessToken);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
-  const payload = Object.assign({}, req.body, { created_by: user.id });
+  const body = req.body || {};
+  const payload = {
+    ...body,
+    created_by: user.id,
+    images: Array.isArray(body.images) && body.images.length > 0 ? body.images : null,
+    tags: Array.isArray(body.tags) && body.tags.length > 0 ? body.tags : null,
+  };
   try {
     const resp = await fetch(`${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/plans`, {
       method: 'POST',
@@ -1052,6 +1058,182 @@ router.post('/rpc/:name', async (req, res) => {
     }
   } catch (err) {
     res.status(500).json({ error: String(err) });
+  }
+});
+
+
+// Update own plan (owner only)
+router.patch('/db/plans/:id', async (req, res) => {
+  const accessToken = req.headers.authorization?.split(' ')[1];
+  const user = await verifyUser(accessToken);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { id } = req.params;
+  const body = req.body || {};
+
+  try {
+    const check = await fetch(`${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/plans?id=eq.${encodeURIComponent(id)}&select=id,created_by`, {
+      headers: { apikey: SUPABASE_SERVER_KEY, Authorization: `Bearer ${SUPABASE_SERVER_KEY}` },
+    });
+    const rows = await check.json();
+    if (!rows || rows.length === 0) return res.status(404).json({ error: 'Plan not found' });
+    if (rows[0].created_by !== user.id) return res.status(403).json({ error: 'Forbidden' });
+
+    const payload = {
+      name: body.name,
+      description: body.description,
+      category: body.category,
+      location: body.location,
+      address: body.address,
+      emoji: body.emoji,
+      images: Array.isArray(body.images) && body.images.length > 0 ? body.images : null,
+      tags: Array.isArray(body.tags) && body.tags.length > 0 ? body.tags : null,
+      updated_at: body.updated_at || new Date().toISOString(),
+    };
+
+    const resp = await fetch(`${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/plans?id=eq.${encodeURIComponent(id)}&select=*`, {
+      method: 'PATCH',
+      headers: {
+        apikey: SUPABASE_SERVER_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVER_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=representation',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await resp.json();
+    const updated = Array.isArray(data) ? data[0] : data;
+    if (!updated) return res.status(409).json({ error: 'No row updated' });
+
+    res.status(resp.status).json(updated);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Delete own plan (owner only)
+router.delete('/db/plans/:id', async (req, res) => {
+  const accessToken = req.headers.authorization?.split(' ')[1];
+  const user = await verifyUser(accessToken);
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { id } = req.params;
+  try {
+    const check = await fetch(`${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/plans?id=eq.${encodeURIComponent(id)}&select=id,created_by`, {
+      headers: { apikey: SUPABASE_SERVER_KEY, Authorization: `Bearer ${SUPABASE_SERVER_KEY}` },
+    });
+    const rows = await check.json();
+    if (!rows || rows.length === 0) return res.status(404).json({ error: 'Plan not found' });
+    if (rows[0].created_by !== user.id) return res.status(403).json({ error: 'Forbidden' });
+
+    const resp = await fetch(`${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/plans?id=eq.${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: { apikey: SUPABASE_SERVER_KEY, Authorization: `Bearer ${SUPABASE_SERVER_KEY}` },
+    });
+    res.status(resp.status).send(await resp.text());
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// ============================================================
+// ADMIN: Update AI recommendations (cron job)
+// ============================================================
+// Endpoint: POST /api/admin/update-ai-recommendations
+// Protection: CRON_SECRET_KEY header matching process.env.CRON_SECRET_KEY
+// Purpose: Update ai_recommended flag based on score >= 70 AND reviews_count >= 1
+router.post('/admin/update-ai-recommendations', async (req, res) => {
+  const CRON_SECRET_KEY = process.env.CRON_SECRET_KEY;
+  
+  // Require CRON_SECRET_KEY to be set
+  if (!CRON_SECRET_KEY) {
+    return res.status(500).json({
+      error: 'CRON_SECRET_KEY not configured on server',
+    });
+  }
+
+  // Validate authorization header
+  const incomingSecret = req.headers['x-cron-secret'] || req.headers['authorization'];
+  if (!incomingSecret) {
+    return res.status(401).json({
+      error: 'Missing x-cron-secret header or authorization',
+    });
+  }
+
+  // For Bearer token format: "Bearer <secret>"
+  const secret = incomingSecret.startsWith('Bearer ')
+    ? incomingSecret.slice(7)
+    : incomingSecret;
+
+  if (secret !== CRON_SECRET_KEY) {
+    return res.status(403).json({
+      error: 'Invalid cron secret',
+    });
+  }
+
+  if (!SUPABASE_URL || !SUPABASE_SERVER_KEY) {
+    return res.status(500).json({
+      error: 'Supabase not configured',
+    });
+  }
+
+  try {
+    console.log('[CRON] Starting update_ai_recommendations...');
+    
+    // Call the Supabase RPC function
+    const resp = await fetch(
+      `${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/rpc/update_ai_recommendations`,
+      {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_SERVER_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVER_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      }
+    );
+
+    if (!resp.ok) {
+      const errorText = await resp.text();
+      console.error('[CRON] RPC error:', resp.status, errorText);
+      return res.status(resp.status).json({
+        error: 'Failed to update AI recommendations',
+        details: errorText,
+      });
+    }
+
+    console.log('[CRON] Successfully updated AI recommendations');
+    
+    // Also get some stats to include in response
+    const statsResp = await fetch(
+      `${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/plans?select=count&ai_recommended=eq.true`,
+      {
+        headers: {
+          apikey: SUPABASE_SERVER_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVER_KEY}`,
+          Prefer: 'count=exact',
+        },
+      }
+    );
+
+    const aiRecommendedCount = statsResp.headers.get('content-range')
+      ? parseInt(statsResp.headers.get('content-range').split('/')[1], 10)
+      : null;
+
+    res.json({
+      success: true,
+      message: 'AI recommendations updated successfully',
+      timestamp: new Date().toISOString(),
+      aiRecommendedCount,
+    });
+  } catch (err) {
+    console.error('[CRON] Caught error:', err);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: String(err),
+    });
   }
 });
 
